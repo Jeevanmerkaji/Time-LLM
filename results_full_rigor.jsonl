@@ -1,0 +1,23 @@
+{"profile_id": 70, "method": "dlinear", "seed": 0, "status": "ok", "test_mse": 0.0434, "test_mae": 0.1614, "elapsed_s": 204.64}
+{"profile_id": 70, "method": "dlinear", "seed": 1, "status": "ok", "test_mse": 0.0304, "test_mae": 0.117, "elapsed_s": 198.59624552726746}
+{"profile_id": 70, "method": "dlinear", "seed": 2, "status": "ok", "test_mse": 0.0312, "test_mae": 0.1206, "elapsed_s": 186.6151852607727}
+{"profile_id": 70, "method": "lstm", "seed": 0, "status": "ok", "test_mse": 0.0158, "test_mae": 0.0676, "elapsed_s": 5748.81325006485}
+{"profile_id": 70, "method": "lstm", "seed": 1, "status": "ok", "test_mse": 0.0146, "test_mae": 0.0603, "elapsed_s": 5643.612445831299}
+{"profile_id": 70, "method": "lstm", "seed": 2, "status": "ok", "test_mse": 0.0145, "test_mae": 0.0609, "elapsed_s": 5701.037721395493}
+{"profile_id": 70, "method": "time_llm", "seed": 0, "status": "ok", "test_mse": 0.0313, "test_mae": 0.1215, "elapsed_s": 28717.494305610657}
+{"profile_id": 70, "method": "time_llm", "seed": 1, "status": "ok", "test_mse": 0.0206, "test_mae": 0.0782, "elapsed_s": 31169.7693195343}
+{"profile_id": 70, "method": "time_llm", "seed": 2, "status": "ok", "test_mse": 0.0221, "test_mae": 0.0959, "elapsed_s": 27963.371072292328}
+{"profile_id": 62, "method": "dlinear", "seed": 0, "status": "ok", "test_mse": 0.0003, "test_mae": 0.0134, "elapsed_s": 162.57261109352112}
+{"profile_id": 62, "method": "dlinear", "seed": 1, "status": "ok", "test_mse": 0.0003, "test_mae": 0.0135, "elapsed_s": 160.57435202598572}
+{"profile_id": 62, "method": "dlinear", "seed": 2, "status": "ok", "test_mse": 0.0003, "test_mae": 0.0135, "elapsed_s": 161.76171112060547}
+{"profile_id": 62, "method": "lstm", "seed": 0, "status": "ok", "test_mse": 0.0012, "test_mae": 0.0229, "elapsed_s": 5302.165200710297}
+{"profile_id": 62, "method": "lstm", "seed": 1, "status": "ok", "test_mse": 0.0005, "test_mae": 0.0155, "elapsed_s": 5272.77064704895}
+{"profile_id": 62, "method": "lstm", "seed": 2, "status": "ok", "test_mse": 0.0003, "test_mae": 0.0136, "elapsed_s": 5316.984771728516}
+{"profile_id": 62, "method": "time_llm", "seed": 0, "status": "failed", "elapsed_s": 2822.773547410965, "stderr_tail": "Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.\n\nLoading weights:   0%|          | 0/148 [00:00<?, ?it/s]\nLoading weights: 100%|##########| 148/148 [00:00<00:00, 5602.45it/s]\n"}
+{"profile_id": 62, "method": "time_llm", "seed": 0, "status": "ok", "test_mse": 0.0003, "test_mae": 0.0141, "elapsed_s": 20954.984450101852}
+{"profile_id": 62, "method": "time_llm", "seed": 1, "status": "ok", "test_mse": 0.0003, "test_mae": 0.0139, "elapsed_s": 16324.307630777359}
+{"profile_id": 62, "method": "time_llm", "seed": 2, "status": "ok", "test_mse": 0.0006, "test_mae": 0.019, "elapsed_s": 2689.9744703769684}
+{"profile_id": 44, "method": "dlinear", "seed": 0, "status": "ok", "test_mse": 0.0568, "test_mae": 0.0976, "elapsed_s": 170.28585290908813}
+{"profile_id": 44, "method": "dlinear", "seed": 1, "status": "ok", "test_mse": 0.0575, "test_mae": 0.0941, "elapsed_s": 170.27682638168335}
+{"profile_id": 44, "method": "dlinear", "seed": 2, "status": "ok", "test_mse": 0.0931, "test_mae": 0.1038, "elapsed_s": 173.75151824951172}
+{"profile_id": 44, "method": "lstm", "seed": 0, "status": "ok", "test_mse": 0.0929, "test_mae": 0.0962, "elapsed_s": 3657.2014725208282}

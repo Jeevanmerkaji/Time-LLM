@@ -1,0 +1,26 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Large / regeneratable artifacts
+checkpoints/
+*.pt
+*.pt.resume
+
+# Raw unfiltered Kaggle file (300MB, not used directly -- see README Step 3)
+data/electric_motor_temp/
+
+# Logs
+full_rigor_log.txt
+*.log
+
+# OS
+.DS_Store
+
+# Claude Code session-local settings
+.claude/
+
+# Copyrighted reference PDF (link to arXiv instead of redistributing)
+2310.01728v2.pdf
+
