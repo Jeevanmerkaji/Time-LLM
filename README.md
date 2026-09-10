@@ -2,7 +2,7 @@
 
 **Does reprogramming a frozen LLM beat a small from-scratch model at real-world sensor forecasting?** A from-scratch reproduction of [Time-LLM](https://arxiv.org/abs/2310.01728) (Jin et al., ICLR 2024), evaluated against LSTM and DLinear baselines across multiple real-world sessions and seeds — not just one lucky run.
 
-[![Paper](https://img.shields.io/badge/paper-PDF-red)](arxiv_paper/TimeLLM.pdf) [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](#quickstart) [![Original Paper](https://img.shields.io/badge/original-Time--LLM-lightgrey)](https://arxiv.org/abs/2310.01728)
+[![Paper](https://img.shields.io/badge/paper-PDF-red)](arxiv_paper/TimeLLM.pdf) [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](#quickstart) [![Original Paper](https://img.shields.io/badge/original-Time--LLM-lightgrey)](https://arxiv.org/abs/2310.01728) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 > **Key finding:** Across 3 independent real-world sessions × 3 seeds (27 runs total), **no single method wins consistently.** LSTM wins one session, DLinear/Time-LLM tie on another, and Time-LLM wins the third outright — a genuine split verdict, not a clean win for either the reprogrammed-LLM approach or the classic baseline. Full details in [`PAPER_DRAFT.md`](PAPER_DRAFT.md) and the [compiled paper](arxiv_paper/TimeLLM.pdf).
 
