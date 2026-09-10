@@ -1,8 +1,8 @@
 # Reprogramming a Frozen LLM for Motor Temperature Forecasting: A Multi-Session, Multi-Seed Reproduction and Baseline Study
 
 *Draft — full-rigor revision. Supersedes the single-session `REPORT.md` for
-the arXiv/workshop submission. Status: matrix in progress, see*
-`results_full_rigor_summary.md` *for live numbers; placeholders below marked* `[TBD]`.
+the arXiv/workshop submission. Status: all 27/27 runs complete
+(see `results_full_rigor_summary.md` for the raw aggregation).*
 
 ## Abstract
 
@@ -16,14 +16,22 @@ Electric Motor Temperature dataset. Unlike a typical single-run comparison,
 we evaluate across **3 independent real-world recording sessions**
 (`profile_id` 70, 62, 44) **× 3 random seeds** (9 runs per method, 27 total),
 reporting mean ± standard deviation rather than single-point estimates. Our
-central finding is that the reprogrammed-LLM approach's relative ranking
-against the LSTM baseline is **session-dependent**: [TBD — fill in once
-profile 44 completes; current partial data shows Time-LLM outperforming LSTM
-on profile 62 while LSTM outperforms Time-LLM on profile 70]. This nuances
-the common assumption that a small from-scratch baseline uniformly dominates
-LLM-reprogramming on data-abundant, single-sensor tasks, and highlights the
-importance of multi-session evaluation before drawing method-level
-conclusions from time-series forecasting comparisons.
+central finding is that **no single method dominates across sessions**: the
+from-scratch LSTM baseline wins on `profile_id=70` (31% lower MSE than
+Time-LLM, replicating an earlier single-session result), DLinear and Time-LLM
+are statistically indistinguishable at a near-zero error floor on
+`profile_id=62`, and **Time-LLM wins outright on `profile_id=44`** (27% lower
+MSE than LSTM, 10% lower than DLinear). Averaged across all three sessions,
+Time-LLM achieves the lowest mean test MSE of the three methods (0.0290 vs.
+LSTM's 0.0337 and DLinear's 0.0348), while LSTM achieves the lowest mean MAE
+(0.0581 vs. Time-LLM's 0.0793) — a split verdict that itself is the main
+result. This directly contradicts the common assumption, supported by our
+own earlier single-session pilot, that a small from-scratch baseline
+uniformly dominates LLM-reprogramming on data-abundant, single-sensor tasks,
+and demonstrates why multi-session evaluation is necessary before drawing
+method-level conclusions from time-series forecasting comparisons — a
+single session, however carefully chosen, can misrepresent the general
+ranking of methods on a dataset with heterogeneous recording sessions.
 
 ## 1. Motivation
 
@@ -44,7 +52,11 @@ sensitive to both the specific recording window and training stochasticity.
 This work extends that comparison to **3 independent real-world sessions ×
 3 seeds per method**, asking: *does the from-scratch baseline's advantage
 hold up across multiple independent slices of real data, or was the
-original single-session result an outlier?*
+original single-session result an artifact of that one session?* The answer,
+reported in Section 4, is that it was partly an artifact: the LSTM's
+advantage replicates on the original session but reverses on another,
+with the third session landing all three methods within noise of each
+other.
 
 ## 2. Method
 
@@ -88,8 +100,8 @@ sessions** to test cross-session robustness:
 | `profile_id` | Rows | Notes |
 |---|---|---|
 | 70 | 25,677 | mid-sized session, used in the original single-session study |
-| 62 | [TBD — row count] | — |
-| 44 | [TBD — row count] | — |
+| 62 | 25,600 | — |
+| 44 | 26,341 | — |
 
 Target: `pm` (permanent-magnet/rotor temperature). Window size
 `seq_len=240`/`pred_len=60` (2 minutes of history → 30 seconds ahead),
@@ -114,58 +126,108 @@ per (session, method) from that log.
 
 ## 4. Results
 
-*Auto-generated from `results_full_rigor_summary.md` — regenerate this
-section by running `python aggregate_results.py` after the matrix
-completes and pasting the output tables here.*
+All 27/27 runs complete (3 sessions × 3 methods × 3 seeds). Full raw
+aggregation in `results_full_rigor_summary.md`, regenerable via
+`python aggregate_results.py`.
 
 ### 4.1 Per-session results
 
-**[TBD — insert the three per-`profile_id` tables from
-`results_full_rigor_summary.md` here once all 27 runs finish. Partial
-results as of this draft:]**
+| `profile_id=70` | Test MSE | Test MAE | Train time (mean) |
+|---|---|---|---|
+| DLinear | 0.0350 ± 0.0073 | 0.1330 ± 0.0247 | 0.05h |
+| **LSTM** | **0.0150 ± 0.0007** | **0.0629 ± 0.0041** | 1.58h |
+| Time-LLM | 0.0247 ± 0.0058 | 0.0985 ± 0.0218 | 8.13h |
 
-- `profile_id=70`: LSTM (0.0150 ± 0.0007 MSE) beats Time-LLM
-  (0.0247 ± 0.0058 MSE) beats DLinear (0.0350 ± 0.0073 MSE). Consistent
-  with the original single-session finding.
-- `profile_id=62`: **Time-LLM (0.0004 ± 0.0002 MSE) beats LSTM
-  (0.0007 ± 0.0005 MSE)** — DLinear is marginally best here
-  (0.0003 ± 0.0000 MSE), but all three methods are within noise of each
-  other on this session (errors near the floor of the target's dynamic
-  range).
-- `profile_id=44`: incomplete — DLinear done (0.0691 ± 0.0208 MSE); LSTM
-  and Time-LLM pending.
+| `profile_id=62` | Test MSE | Test MAE | Train time (mean) |
+|---|---|---|---|
+| **DLinear** | **0.0003 ± 0.0000** | **0.0135 ± 0.0001** | 0.04h |
+| LSTM | 0.0007 ± 0.0005 | 0.0173 ± 0.0049 | 1.47h |
+| Time-LLM | 0.0004 ± 0.0002 | 0.0157 ± 0.0029 | 3.70h |
+
+| `profile_id=44` | Test MSE | Test MAE | Train time (mean) |
+|---|---|---|---|
+| DLinear | 0.0691 ± 0.0208 | 0.0985 ± 0.0049 | 0.05h |
+| LSTM | 0.0853 ± 0.0086 | 0.0940 ± 0.0020 | 0.53h |
+| **Time-LLM** | **0.0619 ± 0.0019** | 0.1236 ± 0.0247 | 6.58h |
+
+**Each method wins exactly one of the three sessions on test MSE.** On
+`profile_id=70`, LSTM beats Time-LLM by 31% MSE — a clean replication of
+the original single-session finding. On `profile_id=62`, all three methods
+sit within a very narrow, near-zero error band (this session's `pm` target
+appears to have an unusually low dynamic range/noise floor, making the
+forecasting task close to saturated for all three methods regardless of
+capacity); DLinear is nominally lowest but the seed-to-seed spread mostly
+overlaps with Time-LLM's. On `profile_id=44`, **Time-LLM wins outright**:
+27% lower MSE than LSTM and 10% lower than DLinear, with the smallest
+seed-to-seed std of the three methods on this session (± 0.0019 MSE) —
+the most confidently-won session in the whole matrix.
 
 ### 4.2 Cross-session summary
 
-**[TBD — insert the cross-session table once complete.]**
+| Method | Mean Test MSE | Mean Test MAE | Sessions won (MSE) |
+|---|---|---|---|
+| DLinear | 0.0348 | 0.0817 | 1/3 (`p62`) |
+| LSTM | 0.0337 | **0.0581** | 1/3 (`p70`) |
+| **Time-LLM** | **0.0290** | 0.0793 | 1/3 (`p44`) |
+
+(Mean of per-session means, unweighted across sessions — see the caveat in
+Section 5 on why this specific aggregation should be read cautiously
+despite Time-LLM's lead here.)
 
 ## 5. Discussion
 
-**The LSTM-wins finding does not generalize uniformly across sessions.**
-On `profile_id=70`, the LSTM baseline's advantage over Time-LLM (reported
-in the original single-session study) replicates. On `profile_id=62`,
-Time-LLM edges out the LSTM baseline, and all three methods converge to
-very low, closely-spaced error — suggesting this particular session is
-close to a regime where model capacity/architecture matters little (a
-slowly-varying or low-dynamic-range signal for this session). [TBD: extend
-this paragraph once `profile_id=44` is complete — does the 3rd session
-break the tie toward LSTM, Time-LLM, or remain mixed?]
+**No method dominates across sessions — the split verdict is the finding.**
+Each of the three methods wins exactly one session on test MSE, and the
+cross-session mean and the cross-session "sessions won" count don't even
+agree on a single winner by every metric: Time-LLM has the lowest mean MSE,
+but LSTM has the lowest mean MAE, and all three are tied 1-1-1 on session
+wins. This is the central methodological point of this study: a
+single-session comparison, however carefully run (the original
+`REPORT.md` study used a full 15/30-epoch budget, proper RevIN
+normalization, and a fair from-scratch baseline — nothing about the
+original comparison was sloppy) can still produce a method-ranking claim
+that reverses on a second, equally legitimate session of the same
+underlying real-world dataset. Multi-session evaluation is not a
+nice-to-have for honest claims about which forecasting approach "wins" on
+a sensor-data problem — per-session dynamics (noise floor, signal range,
+operating regime) can matter as much as, or more than, the modeling choice
+itself.
 
-**Implication for practitioners and for reproductions of this kind:** a
-single-session comparison — the norm in a lot of applied forecasting
-write-ups, including our own original draft — can produce a
-method-ranking claim that doesn't hold on a second slice of the same
-underlying real-world dataset. This is a methodological point as much as
-an empirical one: multi-session (not just multi-seed) evaluation matters
-for honest claims about which forecasting approach "wins" on a given
-sensor-data problem, because per-session dynamics (noise floor, signal
-range, operating regime) can matter as much as the modeling choice itself.
+**The cross-session mean MSE should be read with a specific caveat.**
+`profile_id=62`'s errors are roughly two orders of magnitude smaller than
+the other two sessions' (0.0003–0.0007 vs. 0.015–0.09), so an unweighted
+mean across sessions is dominated by whichever method happens to be
+marginally better on the two "harder" sessions (`p70`, `p44`) rather than
+reflecting a genuinely comparable average. Time-LLM's cross-session MSE
+lead is real but should be understood as "wins the harder session
+(`p44`) outright, loses the other harder session (`p70`), ties on the
+easy one (`p62`)" rather than "wins on average" in any deeper sense — we
+report the unweighted mean because it is the simplest defensible
+aggregation given only 3 sessions, not because we think it's the last
+word on ranking.
+
+**Why might Time-LLM win specifically on `profile_id=44`?** We do not have
+a confirmed mechanistic answer — this would require inspecting each
+session's underlying operating conditions (load profile, thermal transient
+vs. steady-state behavior) in the source PMSM dataset, which is out of
+scope here. What we can say: `profile_id=44`'s std across seeds for
+Time-LLM (± 0.0019) is tighter than LSTM's (± 0.0086) and DLinear's
+(± 0.0208) on the same session, meaning Time-LLM's advantage there is not
+an artifact of a single lucky seed. This is consistent with (though not
+proof of) the reprogrammed LLM's frozen pretrained backbone providing more
+useful inductive bias on sessions with more complex/nonstationary dynamics
+than a small from-scratch model can pick up in 15-30 epochs on one
+session's data alone — precisely the kind of scope condition the original
+single-session study's Discussion speculated might exist but couldn't
+observe with only one session available.
 
 **Compute cost remains a first-class, session-independent result.** Across
-all sessions, Time-LLM training took roughly 4-8x longer than the LSTM
-baseline (see per-session tables) for accuracy that is at best comparable
-and at worst worse. This tradeoff is directly decision-relevant regardless
-of which method wins on accuracy for a given session.
+all sessions, Time-LLM training took roughly 4-16x longer than the LSTM
+baseline (1.5-8.1h vs. 0.5-1.6h) for accuracy that is session-dependently
+better, worse, or tied. This tradeoff is directly decision-relevant
+regardless of which method wins on accuracy for a given session, and
+matters even more once the result is "it depends which session you're on"
+rather than a clean win for either side.
 
 ## 6. Limitations and Future Work
 

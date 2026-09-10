@@ -25,3 +25,4 @@
 {"profile_id": 44, "method": "lstm", "seed": 2, "status": "ok", "test_mse": 0.076, "test_mae": 0.0926, "elapsed_s": 1081.358554840088}
 {"profile_id": 44, "method": "time_llm", "seed": 0, "status": "ok", "test_mse": 0.0611, "test_mae": 0.1141, "elapsed_s": 23682.396992206573}
 {"profile_id": 44, "method": "time_llm", "seed": 1, "status": "ok", "test_mse": 0.0641, "test_mae": 0.1517, "elapsed_s": 23469.735956192017}
+{"profile_id": 44, "method": "time_llm", "seed": 2, "status": "ok", "test_mse": 0.0605, "test_mae": 0.1051, "elapsed_s": 23875.734887361526}
