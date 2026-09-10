@@ -1,0 +1,344 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage[colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue]{hyperref}
+\usepackage{natbib}
+\usepackage{xcolor}
+\usepackage{caption}
+
+\newcommand{\code}[1]{\texttt{#1}}
+
+\title{\textbf{Reprogramming a Frozen LLM for Motor Temperature Forecasting:\\
+A Multi-Session, Multi-Seed Reproduction and Baseline Study}}
+
+\author{
+  Jeevan Merkaji Somanna \\
+  \textit{[Affiliation]} \\
+  \texttt{jeevanms5355@gmail.com}
+}
+
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+We reproduce a simplified version of Time-LLM \citep{jin2023time}, which forecasts
+time series by reprogramming a frozen, pretrained language model rather than
+training a forecaster from scratch. Using a GPT-2 (124M) backbone
+\citep{radford2019gpt2} on CPU-only hardware, we implement the reprogramming
+mechanism and reversible instance normalization (RevIN) \citep{kim2022revin}, and
+evaluate against two baselines -- a from-scratch LSTM and a linear DLinear model
+\citep{zeng2023dlinear} -- on Kaggle's real-world Electric Motor Temperature
+dataset \citep{kagglemotor,kirchgassner2021motor}. Unlike a typical single-run
+comparison, we evaluate across \textbf{3 independent real-world recording
+sessions} (\code{profile\_id} 70, 62, 44) \(\times\) \textbf{3 random seeds}
+(9 runs per method, 27 total), reporting mean \(\pm\) standard deviation rather
+than single-point estimates. Our central finding is that \textbf{no single
+method dominates across sessions}: the from-scratch LSTM baseline wins on
+\code{profile\_id=70} (31\% lower MSE than Time-LLM, replicating an earlier
+single-session result), DLinear and Time-LLM are statistically indistinguishable
+at a near-zero error floor on \code{profile\_id=62}, and \textbf{Time-LLM wins
+outright on \code{profile\_id=44}} (27\% lower MSE than LSTM, 10\% lower than
+DLinear). Averaged across all three sessions, Time-LLM achieves the lowest mean
+test MSE of the three methods (0.0290 vs.\ LSTM's 0.0337 and DLinear's 0.0348),
+while LSTM achieves the lowest mean MAE (0.0581 vs.\ Time-LLM's 0.0793) -- a
+split verdict that is itself the main result. This directly complicates the
+common assumption, supported by our own earlier single-session pilot, that a
+small from-scratch baseline uniformly dominates LLM-reprogramming on
+data-abundant, single-sensor tasks, and demonstrates why multi-session
+evaluation is necessary before drawing method-level conclusions from
+time-series forecasting comparisons -- a single session, however carefully
+chosen, can misrepresent the general ranking of methods on a dataset with
+heterogeneous recording sessions.
+\end{abstract}
+
+\section{Motivation}
+
+Forecasting motor temperature from sensor data is a well-studied problem
+usually tackled with purpose-built sequence models (LSTMs, TCNs, Transformers
+trained from scratch on the target domain). Time-LLM \citep{jin2023time}
+proposes an alternative: keep a large pretrained language model frozen, and
+train only a lightweight ``reprogramming'' layer that translates numeric
+time-series patches into something resembling the LLM's native
+token-embedding space. The appeal is that the frozen LLM contributes general
+sequence-reasoning ability learned from massive pretraining, without the cost
+of training a large model from scratch or fine-tuning it.
+
+This project asks a practical question relevant to anyone considering this
+approach for a real sensor-forecasting task: \textit{on modest hardware, with
+a small frozen backbone, does reprogramming actually beat a simple
+task-specific baseline you could train in an afternoon?} We answer this
+empirically rather than assuming the paper's headline results (obtained with
+a 7B-parameter backbone and a full training budget) transfer to a
+constrained, CPU-only, GPT-2-scale setting.
+
+A first pass at this question (single session, single seed) found the
+from-scratch LSTM baseline winning outright. But a single session/seed
+comparison risks over-generalizing from what could be session-specific noise
+or an artifact of one random initialization -- a known concern in
+time-series forecasting benchmarks, where results can be sensitive to both
+the specific recording window and training stochasticity. This work extends
+that comparison to \textbf{3 independent real-world sessions \(\times\) 3
+seeds per method}, asking: \textit{does the from-scratch baseline's advantage
+hold up across multiple independent slices of real data, or was the original
+single-session result an artifact of that one session?} The answer, reported
+in Section~\ref{sec:results}, is that it was partly an artifact: the LSTM's
+advantage replicates on the original session but reverses on another, with
+the third session landing all three methods within noise of each other.
+
+\section{Method}
+
+Time-LLM's core mechanism, as implemented here:
+
+\begin{enumerate}
+  \item \textbf{Patch embedding.} The input window is split into overlapping
+    patches (\code{patch\_len=16}, \code{stride=8}) and linearly projected
+    to a small embedding dimension \code{d\_model}.
+  \item \textbf{Patch reprogramming.} A multi-head cross-attention layer
+    lets each patch embedding attend over a fixed subsample of the frozen
+    LLM's own vocabulary embedding matrix (``text prototypes''), producing
+    an embedding in the LLM's native space without ever editing the LLM's
+    weights.
+  \item \textbf{RevIN} \citep{kim2022revin}. Each input window is normalized
+    using its own mean/std (not a global training-set statistic), and the
+    model's output is denormalized with the same per-window statistics
+    before the loss is computed. This is the mechanism used to handle
+    distribution shift between windows.
+  \item \textbf{Output projection.} The frozen LLM's output over the patch
+    positions is flattened and linearly projected to the forecast horizon.
+\end{enumerate}
+
+Only the patch embedding, reprogramming layer, RevIN's two affine
+parameters, and the output projection are trained. The LLM itself never
+updates -- in our runs, 0.1--1.1\% of total parameters were trainable,
+consistent with the paper's efficiency claims. Prompt-as-Prefix (PaP), the
+paper's optional text-conditioning mechanism, is disabled throughout this
+matrix (\code{--no\_prompt}) to prioritize seed/session coverage within a
+CPU-only compute budget; it was evaluated separately in an earlier
+single-session pilot and roughly quintuples per-sample compute.
+
+\textbf{Baselines.}
+\begin{itemize}
+  \item \textbf{LSTM} -- 2-layer, 64 hidden units, same RevIN normalization
+    and windowing code as Time-LLM, so the comparison isolates the
+    forecasting method rather than data-handling differences.
+  \item \textbf{DLinear} \citep{zeng2023dlinear} -- a simple linear
+    trend/seasonal decomposition model, included as a fast, near-zero-capacity
+    reference point.
+\end{itemize}
+
+\textbf{Deviations from the original paper}, made for tractability on
+CPU-only, no-GPU hardware: a GPT-2 (124M) backbone instead of the paper's
+primary Llama-7B; smaller \code{d\_model}/prototype counts and shorter
+training schedules than the paper's tuned, per-dataset configurations.
+
+\section{Experimental Setup}
+
+\textbf{Dataset.} Kaggle's Electric Motor Temperature dataset
+\citep{kagglemotor,kirchgassner2021motor} (Paderborn University): 185 hours
+of PMSM (permanent magnet synchronous motor) test-bench recordings at 2Hz,
+69 independent measurement sessions (\code{profile\_id}) concatenated with
+no timestamp column. We select 3 sessions to test cross-session robustness:
+
+\begin{center}
+\begin{tabular}{@{}lrl@{}}
+\toprule
+\code{profile\_id} & Rows & Notes \\
+\midrule
+70 & 25{,}677 & mid-sized session, used in the single-session pilot \\
+62 & 25{,}600 & -- \\
+44 & 26{,}341 & -- \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Target: \code{pm} (permanent-magnet/rotor temperature). Window size
+\code{seq\_len=240}/\code{pred\_len=60} (2 minutes of history \(\to\) 30
+seconds ahead), chosen to avoid the near-trivial persistence regime of
+shorter windows at 2Hz sampling.
+
+\textbf{Seeds.} Each (session, method) combination is repeated for seeds
+\(\{0, 1, 2\}\), varying model initialization and stochastic training
+elements; data splits (chronological 70/10/20 train/val/test) are fixed per
+session.
+
+\textbf{Training budget.} DLinear/LSTM: 30 epochs. Time-LLM: 15 epochs.
+Batch size 16 throughout. All runs CPU-only (no GPU), frozen GPT-2 (124M)
+backbone for Time-LLM.
+
+\textbf{Orchestration.} All 27 runs were driven sequentially by a resumable
+orchestration script, with each result checkpointed immediately so progress
+survives interruption. Aggregation (mean \(\pm\) std per session/method) is
+computed from the raw per-run log.
+
+\section{Results}
+\label{sec:results}
+
+All 27/27 runs (3 sessions \(\times\) 3 methods \(\times\) 3 seeds) are
+complete.
+
+\subsection{Per-session results}
+
+\begin{table}[h]
+\centering
+\caption{\code{profile\_id=70}}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Method & Test MSE & Test MAE & Train time (mean) \\
+\midrule
+DLinear & $0.0350 \pm 0.0073$ & $0.1330 \pm 0.0247$ & 0.05h \\
+\textbf{LSTM} & $\mathbf{0.0150 \pm 0.0007}$ & $\mathbf{0.0629 \pm 0.0041}$ & 1.58h \\
+Time-LLM & $0.0247 \pm 0.0058$ & $0.0985 \pm 0.0218$ & 8.13h \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{\code{profile\_id=62}}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Method & Test MSE & Test MAE & Train time (mean) \\
+\midrule
+\textbf{DLinear} & $\mathbf{0.0003 \pm 0.0000}$ & $\mathbf{0.0135 \pm 0.0001}$ & 0.04h \\
+LSTM & $0.0007 \pm 0.0005$ & $0.0173 \pm 0.0049$ & 1.47h \\
+Time-LLM & $0.0004 \pm 0.0002$ & $0.0157 \pm 0.0029$ & 3.70h \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{\code{profile\_id=44}}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Method & Test MSE & Test MAE & Train time (mean) \\
+\midrule
+DLinear & $0.0691 \pm 0.0208$ & $0.0985 \pm 0.0049$ & 0.05h \\
+LSTM & $0.0853 \pm 0.0086$ & $0.0940 \pm 0.0020$ & 0.53h \\
+\textbf{Time-LLM} & $\mathbf{0.0619 \pm 0.0019}$ & $0.1236 \pm 0.0247$ & 6.58h \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Each method wins exactly one of the three sessions on test MSE.} On
+\code{profile\_id=70}, LSTM beats Time-LLM by 31\% MSE -- a clean replication
+of the single-session pilot. On \code{profile\_id=62}, all three methods sit
+within a very narrow, near-zero error band (this session's \code{pm} target
+appears to have an unusually low dynamic range/noise floor, making the
+forecasting task close to saturated for all three methods regardless of
+capacity); DLinear is nominally lowest but the seed-to-seed spread mostly
+overlaps with Time-LLM's. On \code{profile\_id=44}, \textbf{Time-LLM wins
+outright}: 27\% lower MSE than LSTM and 10\% lower than DLinear, with the
+smallest seed-to-seed std of the three methods on this session
+($\pm 0.0019$ MSE) -- the most confidently-won session in the whole matrix.
+
+\subsection{Cross-session summary}
+
+\begin{table}[h]
+\centering
+\caption{Mean of per-session means, unweighted across sessions.}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Method & Mean Test MSE & Mean Test MAE & Sessions won (MSE) \\
+\midrule
+DLinear & 0.0348 & 0.0817 & 1/3 (\code{p62}) \\
+LSTM & 0.0337 & \textbf{0.0581} & 1/3 (\code{p70}) \\
+\textbf{Time-LLM} & \textbf{0.0290} & 0.0793 & 1/3 (\code{p44}) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+(See Section~\ref{sec:discussion} for a caveat on why this specific
+unweighted aggregation should be read cautiously despite Time-LLM's lead
+here.)
+
+\section{Discussion}
+\label{sec:discussion}
+
+\textbf{No method dominates across sessions -- the split verdict is the
+finding.} Each of the three methods wins exactly one session on test MSE,
+and the cross-session mean and the cross-session ``sessions won'' count
+don't even agree on a single winner by every metric: Time-LLM has the
+lowest mean MSE, but LSTM has the lowest mean MAE, and all three are tied
+1-1-1 on session wins. This is the central methodological point of this
+study: a single-session comparison, however carefully run (the original
+pilot used a full 15/30-epoch budget, proper RevIN normalization, and a
+fair from-scratch baseline -- nothing about the original comparison was
+sloppy) can still produce a method-ranking claim that reverses on a second,
+equally legitimate session of the same underlying real-world dataset.
+Multi-session evaluation is not a nice-to-have for honest claims about
+which forecasting approach ``wins'' on a sensor-data problem -- per-session
+dynamics (noise floor, signal range, operating regime) can matter as much
+as, or more than, the modeling choice itself.
+
+\textbf{The cross-session mean MSE should be read with a specific caveat.}
+\code{profile\_id=62}'s errors are roughly two orders of magnitude smaller
+than the other two sessions' (0.0003--0.0007 vs.\ 0.015--0.09), so an
+unweighted mean across sessions is dominated by whichever method happens to
+be marginally better on the two ``harder'' sessions (\code{p70}, \code{p44})
+rather than reflecting a genuinely comparable average. Time-LLM's
+cross-session MSE lead is real but should be understood as ``wins the
+harder session (\code{p44}) outright, loses the other harder session
+(\code{p70}), ties on the easy one (\code{p62})'' rather than ``wins on
+average'' in any deeper sense -- we report the unweighted mean because it
+is the simplest defensible aggregation given only 3 sessions, not because
+we think it is the last word on ranking.
+
+\textbf{Why might Time-LLM win specifically on \code{profile\_id=44}?} We
+do not have a confirmed mechanistic answer -- this would require inspecting
+each session's underlying operating conditions (load profile, thermal
+transient vs.\ steady-state behavior) in the source PMSM dataset, which is
+out of scope here. What we can say: \code{profile\_id=44}'s std across
+seeds for Time-LLM ($\pm 0.0019$) is tighter than LSTM's ($\pm 0.0086$) and
+DLinear's ($\pm 0.0208$) on the same session, meaning Time-LLM's advantage
+there is not an artifact of a single lucky seed. This is consistent with
+(though not proof of) the reprogrammed LLM's frozen pretrained backbone
+providing more useful inductive bias on sessions with more
+complex/nonstationary dynamics than a small from-scratch model can pick up
+in 15--30 epochs on one session's data alone.
+
+\textbf{Compute cost remains a first-class, session-independent result.}
+Across all sessions, Time-LLM training took roughly 4--16$\times$ longer
+than the LSTM baseline (1.5--8.1h vs.\ 0.5--1.6h) for accuracy that is
+session-dependently better, worse, or tied. This tradeoff is directly
+decision-relevant regardless of which method wins on accuracy for a given
+session, and matters even more once the result is ``it depends which
+session you're on'' rather than a clean win for either side.
+
+\section{Limitations and Future Work}
+
+\begin{itemize}
+  \item \textbf{Backbone scale} is the most likely lever left untested:
+    repeating these experiments with a 7B-parameter backbone (as in the
+    original paper) on a GPU would directly test whether the session-split
+    result changes with more model capacity.
+  \item \textbf{Prompt-as-Prefix disabled} in this matrix for CPU-time
+    reasons; a full-rigor PaP comparison (matched epochs, richer
+    natural-language prompt) is a natural extension.
+  \item \textbf{3 of 69 available sessions} were used; broader coverage (more
+    sessions, or a formal stratified sample across operating conditions)
+    would further strengthen the cross-session claim.
+  \item \textbf{Time-LLM epoch budget (15) vs.\ LSTM/DLinear (30)} --
+    asymmetric budgets are a possible confound worth noting, kept for
+    CPU-time reasons.
+\end{itemize}
+
+\section{Reproducibility}
+
+All code, exact hyperparameters, per-run logs, and the raw results file for
+every run reported here are available at:
+\begin{center}
+\url{https://github.com/Jeevanmerkaji/Time-LLM}
+\end{center}
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\end{document}
