@@ -7,6 +7,12 @@ motor temperature sensor data.
 
 Official repo (for full-fidelity comparison): https://github.com/KimMeen/Time-LLM
 
+**Looking for the multi-session, multi-seed headline result?** See
+[`PAPER_DRAFT.md`](PAPER_DRAFT.md) — the single-session numbers below are
+the original pilot; the full-rigor 27-run matrix (3 real Kaggle sessions ×
+3 methods × 3 seeds) supersedes its "LSTM wins" framing with a more nuanced
+finding (see [Full-rigor multi-session results](#full-rigor-multi-session-results)).
+
 ## What this is
 
 The core idea from the paper: instead of training a bespoke forecasting
@@ -53,11 +59,18 @@ real hardware** with real pretrained weights — see the
 - ✅ Run end-to-end on a real-world dataset — Kaggle's "Electric Motor
   Temperature" PMSM dataset (rotor temperature, `pm`) — beating a naive
   persistence baseline by ~41-49% on MSE/MAE (see Results)
-- ✅ Compared against a from-scratch LSTM baseline on the identical
-  real-world data/windows — the **LSTM baseline actually wins**: 31% lower
-  MSE, 22% lower MAE, ~26x fewer trainable params, ~5x faster to train
-  (see Results and Discussion) — an honest, useful negative result for the
-  reprogramming approach on this particular task
+- ✅ Compared against a from-scratch LSTM baseline on one real-world
+  session (`profile_id=70`) — in that single-session pilot, the **LSTM
+  baseline won**: 31% lower MSE, 22% lower MAE, ~26x fewer trainable
+  params, ~5x faster to train (see Results and Discussion below)
+- ✅ **Extended to a full-rigor matrix**: 3 real Kaggle sessions × 3
+  methods (DLinear/LSTM/Time-LLM) × 3 seeds = 27 runs, all complete. This
+  revises the single-session takeaway above — **no method dominates
+  across sessions**: LSTM's win replicates on `profile_id=70`, but
+  Time-LLM wins outright on `profile_id=44` (27% lower MSE than LSTM),
+  with `profile_id=62` a near-tie for all three methods. See
+  [Full-rigor multi-session results](#full-rigor-multi-session-results)
+  below and `PAPER_DRAFT.md` for the full writeup.
 
 Still open:
 - ❌ Numbers are not yet close to the paper's Table 1 (ETTh1, 96→24) — see
@@ -365,6 +378,65 @@ benchmarks like ETTh1 vs. small/well-behaved single-sensor series) is
 itself a useful result to report, especially set against a background of
 having built the LSTM-style baseline first.
 
+**⚠️ This was a single session, single seed.** See the next section for
+what happens when the same comparison is repeated across 3 sessions and 3
+seeds per method — the "LSTM wins" framing above does not hold up
+uniformly.
+
+## Full-rigor multi-session results
+
+The single-session comparison above uses one Kaggle recording session
+(`profile_id=70`) and one random seed per method — a reasonable pilot, but
+not enough to claim a general method-level ranking. `run_full_rigor.py`
+extends it to **3 independent real-world sessions × 3 methods × 3 seeds =
+27 runs** (`profile_id` 70, 62, 44; DLinear, LSTM, Time-LLM;
+`seq_len=240`/`pred_len=60` throughout, `--no_prompt` for Time-LLM). All
+27/27 runs are complete; raw results in `results_full_rigor.jsonl`,
+generated summary in `results_full_rigor_summary.md`
+(`python aggregate_results.py` to regenerate), full writeup with discussion
+in [`PAPER_DRAFT.md`](PAPER_DRAFT.md).
+
+| `profile_id=70` | Test MSE | Test MAE | Train time (mean) |
+|---|---|---|---|
+| DLinear | 0.0350 ± 0.0073 | 0.1330 ± 0.0247 | 0.05h |
+| **LSTM** | **0.0150 ± 0.0007** | **0.0629 ± 0.0041** | 1.58h |
+| Time-LLM | 0.0247 ± 0.0058 | 0.0985 ± 0.0218 | 8.13h |
+
+| `profile_id=62` | Test MSE | Test MAE | Train time (mean) |
+|---|---|---|---|
+| **DLinear** | **0.0003 ± 0.0000** | **0.0135 ± 0.0001** | 0.04h |
+| LSTM | 0.0007 ± 0.0005 | 0.0173 ± 0.0049 | 1.47h |
+| Time-LLM | 0.0004 ± 0.0002 | 0.0157 ± 0.0029 | 3.70h |
+
+| `profile_id=44` | Test MSE | Test MAE | Train time (mean) |
+|---|---|---|---|
+| DLinear | 0.0691 ± 0.0208 | 0.0985 ± 0.0049 | 0.05h |
+| LSTM | 0.0853 ± 0.0086 | 0.0940 ± 0.0020 | 0.53h |
+| **Time-LLM** | **0.0619 ± 0.0019** | 0.1236 ± 0.0247 | 6.58h |
+
+**Each method wins exactly one of the three sessions on test MSE.** LSTM's
+win on `profile_id=70` replicates the single-session pilot above, but
+`profile_id=62` is a near-tie for all three methods (errors near this
+session's noise floor), and **Time-LLM wins `profile_id=44` outright** —
+27% lower MSE than LSTM, 10% lower than DLinear, with the tightest
+seed-to-seed spread of any result in the matrix (± 0.0019).
+
+| Cross-session mean | Test MSE | Test MAE | Sessions won (MSE) |
+|---|---|---|---|
+| DLinear | 0.0348 | 0.0817 | 1/3 (`p62`) |
+| LSTM | 0.0337 | **0.0581** | 1/3 (`p70`) |
+| **Time-LLM** | **0.0290** | 0.0793 | 1/3 (`p44`) |
+
+Time-LLM has the lowest mean MSE but LSTM has the lowest mean MAE — a
+genuine split verdict, not a clean win for either the reprogrammed-LLM
+approach or the from-scratch baseline. **The real finding here is
+methodological**: a single-session comparison (even a carefully-run one,
+like the pilot above) can produce a method-ranking claim that reverses on
+a second, equally legitimate session of the same real-world dataset.
+See `PAPER_DRAFT.md` Section 5 for the full discussion, including a caveat
+on why the unweighted cross-session mean should be read cautiously (one
+session's errors are ~100x smaller in scale than the other two).
+
 ## Step 4 — Compare against a baseline of your own
 
 `lstm_baseline.py` + `train_lstm.py` provide a from-scratch LSTM baseline
@@ -386,18 +458,38 @@ last observed value) as a cheap sanity floor.
 
 ## Suggested report structure (for arXiv / workshop writeup)
 
+`PAPER_DRAFT.md` already implements this structure for the full-rigor
+multi-session study — use it as-is or as a starting point:
+
 1. **Motivation** — bridge from physics-based simulation → LSTM (your
    thesis) → LLM-reprogrammed forecasting (this work)
 2. **Method** — brief summary of Time-LLM's reprogramming mechanism
    (cite the original paper properly — see `CITATION.md`)
 3. **Setup** — your dataset, preprocessing, train/val/test split, backbone
    choice (GPT-2), hyperparameters
-4. **Results** — table: LSTM baseline vs. reprogrammed-LLM, MSE + MAE
+4. **Results** — table: baselines vs. reprogrammed-LLM, MSE + MAE, per
+   session and aggregated (see Full-rigor multi-session results above)
 5. **Discussion** — what worked, what didn't, compute cost tradeoffs,
    honest limitations
 6. **Reproducibility** — link to your GitHub repo with exact run commands
 
 ## Files
+
+- `run_full_rigor.py` — orchestrates the full-rigor matrix (3 sessions × 3
+  methods × 3 seeds = 27 runs), resumable — skips any
+  `(profile_id, method, seed)` already marked `"ok"` in
+  `results_full_rigor.jsonl`
+- `aggregate_results.py` — computes mean ± std MSE/MAE per (session,
+  method) from `results_full_rigor.jsonl`, writes
+  `results_full_rigor_summary.md`
+- `results_full_rigor.jsonl` — one JSON record per finished full-rigor run
+- `results_full_rigor_summary.md` — generated summary tables (regenerate
+  with `python aggregate_results.py`)
+- `PAPER_DRAFT.md` — full writeup of the multi-session, multi-seed study
+  (supersedes the single-session narrative in this README/`REPORT.md`)
+- `dlinear_baseline.py` / `train_dlinear.py` — from-scratch DLinear
+  baseline (trend + seasonal linear decomposition), used in the full-rigor
+  matrix alongside the LSTM baseline
 
 - `model.py` — TimeLLM model: RevIN (per-instance normalization, reversed
   on output), Prompt-as-Prefix (per-window text prompt of instruction +
