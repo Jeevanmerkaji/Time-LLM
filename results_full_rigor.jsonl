@@ -21,3 +21,7 @@
 {"profile_id": 44, "method": "dlinear", "seed": 1, "status": "ok", "test_mse": 0.0575, "test_mae": 0.0941, "elapsed_s": 170.27682638168335}
 {"profile_id": 44, "method": "dlinear", "seed": 2, "status": "ok", "test_mse": 0.0931, "test_mae": 0.1038, "elapsed_s": 173.75151824951172}
 {"profile_id": 44, "method": "lstm", "seed": 0, "status": "ok", "test_mse": 0.0929, "test_mae": 0.0962, "elapsed_s": 3657.2014725208282}
+{"profile_id": 44, "method": "lstm", "seed": 1, "status": "ok", "test_mse": 0.0871, "test_mae": 0.0931, "elapsed_s": 938.0627086162567}
+{"profile_id": 44, "method": "lstm", "seed": 2, "status": "ok", "test_mse": 0.076, "test_mae": 0.0926, "elapsed_s": 1081.358554840088}
+{"profile_id": 44, "method": "time_llm", "seed": 0, "status": "ok", "test_mse": 0.0611, "test_mae": 0.1141, "elapsed_s": 23682.396992206573}
+{"profile_id": 44, "method": "time_llm", "seed": 1, "status": "ok", "test_mse": 0.0641, "test_mae": 0.1517, "elapsed_s": 23469.735956192017}
